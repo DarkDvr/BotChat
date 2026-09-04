@@ -15,6 +15,8 @@ LORE_CORRECTION_THINK_ENABLED = False
 ENABLE_LOG_COLORS = True
 DEBUG_FULL_LOGS = True
 MAX_LOG_CHARS = 1500
+LOG_DIR = "logs"
+LOG_DATE_FORMAT = "%d-%m-%Y %H:%M:%S"
 
 # --- Proxy server ---
 PROXY_HOST = "127.0.0.1"

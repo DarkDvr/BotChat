@@ -1,9 +1,19 @@
 import threading
+import os
+import logging
+import re
 from datetime import datetime
-from config import DEBUG_FULL_LOGS, MAX_LOG_CHARS, ENABLE_LOG_COLORS
+from config import DEBUG_FULL_LOGS, MAX_LOG_CHARS, ENABLE_LOG_COLORS, LOG_DIR, LOG_DATE_FORMAT
+
+# Auto-create logs directory
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
 
 printLock = threading.Lock()
 
+# ============================================================================
+# COLOR DEFINITIONS
+# ============================================================================
 class C:
     if ENABLE_LOG_COLORS:
         RESET = "\033[0m"
@@ -44,11 +54,61 @@ def tagColor(tag):
     return C.WHITE
 
 
+# ============================================================================
+# FILE LOGGER SETUP (Daily Rotation, Plain Text)
+# ============================================================================
+def _getFileLogger():
+    """Returns a logger that writes to daily rotating file (plain text, no colors)."""
+    logger = logging.getLogger("botchat_file")
+    if not logger.handlers:
+        logger.setLevel(logging.DEBUG if DEBUG_FULL_LOGS else logging.INFO)
+        logger.propagate = False
+        
+        # Daily rotating file handler
+        filename = f"botchat_{datetime.now().strftime('%d-%m-%Y')}.log"
+        filepath = os.path.join(LOG_DIR, filename)
+        fileHandler = logging.FileHandler(filepath, mode='a', encoding='utf-8')
+        fileHandler.setLevel(logging.DEBUG if DEBUG_FULL_LOGS else logging.INFO)
+        
+        # Formatter: DD-MM-YYYY HH:MM:SS LEVEL TAG MESSAGE (no colors)
+        formatter = logging.Formatter(fmt="%(asctime)s %(levelname)s: %(message)s", datefmt="%d-%m-%Y %H:%M:%S")
+        fileHandler.setFormatter(formatter)
+        
+        logger.addHandler(fileHandler)
+    
+    return logger
+
+
+_fileLogger = None
+def _getGlobalFileLogger():
+    global _fileLogger
+    if _fileLogger is None:
+        _fileLogger = _getFileLogger()
+    return _fileLogger
+
+
+def _stripAnsi(text):
+    """Remove ANSI escape codes from text for clean file logging."""
+    ansiPattern = r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
+    return re.sub(ansiPattern, '', text)
+
+
+# ============================================================================
+# CONSOLE LOGGING FUNCTIONS
+# ============================================================================
 def log(tag, message):
     ts = datetime.now().strftime("%H:%M:%S")
     color = tagColor(tag)
+    
+    # Console output
+    consoleLine = f"{C.GRAY}[{ts}]{C.RESET} {color}[{tag}]{C.RESET} {message}"
+    
+    # File output (plain text, full timestamp, no colors)
+    fileLogger = _getGlobalFileLogger()
+    fileLogger.info(f"[{tag}] {message}")
+    
     with printLock:
-        print(f"{C.GRAY}[{ts}]{C.RESET} {color}[{tag}]{C.RESET} {message}", flush=True)
+        print(consoleLine, flush=True)
 
 
 def logPayload(tag, text, maxChars=MAX_LOG_CHARS):
@@ -60,14 +120,19 @@ def logPayload(tag, text, maxChars=MAX_LOG_CHARS):
         maxChars = 999999
 
     text = str(text).replace('\\n', '\n')
+    originalLen = len(text)
     if len(text) > maxChars:
-        text = text[:maxChars] + f"\n... [truncated {len(text) - maxChars} chars]"
+        text = text[:maxChars] + f"\n... [truncated {originalLen - maxChars} chars]"
 
     lines = text.split('\n')
     ts = datetime.now().strftime("%H:%M:%S")
     color = tagColor(tag)
     firstLine = f"{C.GRAY}[{ts}]{C.RESET} {color}[{tag}]{C.RESET} {C.GRAY}| {lines[0]}{C.RESET}"
     indent = " " * (16 + len(tag))
+
+    # File output (full payload, no truncation, no colors)
+    fileLogger = _getGlobalFileLogger()
+    fileLogger.debug(f"[{tag}] Payload:\n{text}")
 
     with printLock:
         print(firstLine, flush=True)
@@ -79,6 +144,12 @@ def logRequestHeader(charCount, chatMsg):
     ts = datetime.now().strftime("%H:%M:%S")
     header = f"\n{C.GRAY}[{ts}]{C.RESET} {C.BOLD}{C.RED}=== NEW REQUEST RECEIVED ({charCount} chars) ==={C.RESET}"
     trigger = f"{C.GRAY}[{ts}]{C.RESET} {C.BOLD}{C.RED}>>> TRIGGER: {chatMsg}{C.RESET}"
+    
+    # File output
+    fileLogger = _getGlobalFileLogger()
+    fileLogger.info(f"=== NEW REQUEST RECEIVED ({charCount} chars) ===")
+    fileLogger.info(f">>> TRIGGER: {chatMsg}")
+    
     with printLock:
         print(header, flush=True)
         print(trigger, flush=True)
