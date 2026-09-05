@@ -10,6 +10,14 @@ from french_maid import validateConfig, cleanWowLinks
 if os.name == "nt":
     os.system("")
 
+# Windows console may use cp1252. Replace unsupported chars instead of crashing.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(errors="replace")
+        except Exception:
+            pass
+
 from config import VERSION, PROXY_HOST, PROXY_PORT
 from logging_utils import log, logPayload, logRequestHeader
 from french_maid import validateConfig
