@@ -1,6 +1,7 @@
 # BotChat System
 
 BotChat is a Python middleware proxy for World of Warcraft WotLK 3.3.5 chat bots.
+Hard requirement: AzerothCore, mod-ollama-chat, mod-playerbots.
 
 It receives chat events from the game module, enriches them with memory, gossip, lore, transcripts, and web search, then asks a local LLM to respond like a real player.
 
