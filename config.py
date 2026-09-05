@@ -82,10 +82,19 @@ ROLEPLAYER_API_URL = ""
 ROLEPLAYER_API_KEY = ""
 ROLEPLAYER_MODEL = "qwen3.5:9b"
 
-# --- Rate limiting & Timeouts ---
+# --- RATE LIMITING & TIMEOUTS ---
 ONLINE_API_REQUESTS_PER_SECOND = 1
 ONLINE_API_TIMEOUT = 60
 OLLAMA_TIMEOUT = 45
+
+# --- BREAK ON STRINGS ---
+# List of exact strings that, if found in a player message, will cause the system to immediately discard the message.
+# Used to block addon-generated codes or other non-chat garbage.
+# Supports any special characters, slashes, brackets, etc. Just paste the raw string.
+BREAK_ON_STRINGS = [
+    "V CJ2-23////]]]15/8/4]2-23////]33]28]6d3",
+    # Add more strings here as needed
+]
 
 # --- Skeptic Mode ---
 SKEPTIC_MODE = True

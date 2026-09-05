@@ -1,8 +1,18 @@
 import re
 import sqlite3
-from config import MAX_RESPONSE_LENGTH, CLASSIFIER_CONFIG, FRENCHMAID_CONFIG, ROLEPLAYER_CONFIG
+from config import MAX_RESPONSE_LENGTH, CLASSIFIER_CONFIG, FRENCHMAID_CONFIG, ROLEPLAYER_CONFIG, BREAK_ON_STRINGS
 from logging_utils import log
 from config import LORE_DB_PATH
+
+# --- Break String Filter ---
+def should_break_on_message(text):
+    """Returns True if the message contains any string from BREAK_ON_STRINGS list."""
+    if not text or not BREAK_ON_STRINGS:
+        return False
+    for break_string in BREAK_ON_STRINGS:
+        if break_string in text:
+            return True
+    return False
 
 # --- Slang & Abbreviation Engine ---
 _slangCache = {}
