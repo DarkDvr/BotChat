@@ -43,6 +43,11 @@ def processRequest(prompt, system, options):
 
     botRamInstance.processIncoming(payload)
 
+    # Check if message was flagged for discard
+    if payload.get("discard"):
+        log("MAIN", "Request discarded due to BREAK_ON_STRING filter.")
+        return ""
+
     if payload["isShortCircuit"]:
         log("ROLEPLAYER", "FINAL REPLY (SHORT-CIRCUIT): [Silent/Empty]")
         payload["response"] = ""

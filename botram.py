@@ -15,7 +15,7 @@ from config import (
 
 from logging_utils import log, logPayload
 from engine import callOllama
-from french_maid import cleanWowLinks, expandSlang
+from french_maid import cleanWowLinks, expandSlang, should_break_on_message
 
 class BotRAM:
     def __init__(self):
@@ -316,6 +316,12 @@ class BotRAM:
             if msgMatch: isEvent = True
 
         if msgMatch: playerMsg = cleanWowLinks(msgMatch.group(1).strip())
+
+        # Check for break strings BEFORE any processing
+        if playerMsg and should_break_on_message(playerMsg):
+            log("BOTRAM", f"BREAK_ON_STRING detected in message from {botName}. Discarding request.")
+            payload["discard"] = True
+            return
 
         payload["playerMsg"] = playerMsg
         payload["isEvent"] = isEvent
