@@ -1,8 +1,8 @@
 # ============================================================================
-# CONFIGURATION & PROMPTS (v11)
+# CONFIGURATION & PROMPTS
 # ============================================================================
 
-VERSION = "11"
+VERSION = "11.3"
 
 # --- Thinking Mode Toggles ---
 # Enable Ollama thinking mode for complex analytical tasks. 
@@ -12,7 +12,7 @@ FACT_EXTRACTION_THINK_ENABLED = False
 LORE_CORRECTION_THINK_ENABLED = False
 
 # --- Logging ---
-ENABLE_LOG_COLORS = True
+ENABLE_LOG_COLORS = False
 DEBUG_FULL_LOGS = True
 MAX_LOG_CHARS = 1500
 LOG_DIR = "logs"
@@ -92,8 +92,9 @@ OLLAMA_TIMEOUT = 45
 # Used to block addon-generated codes or other non-chat garbage.
 # Supports any special characters, slashes, brackets, etc. Just paste the raw string.
 BREAK_ON_STRINGS = [
-    "V CJ2-23////]]]15/8/4]2-23////]33]28]6d3",
-    # Add more strings here as needed
+    "CJ2-23",
+    "]]]",
+    "////",
 ]
 
 # --- Skeptic Mode ---
@@ -282,7 +283,8 @@ New message:
 
 ROLEPLAYER_SYSTEM_PROMPT = """You are a real human playing a character in a World of Warcraft guild chat.
 Your goal is light roleplay: embody the character personality and lore provided below, but maintain the casual, brief, and slang-heavy typing style of an actual MMO player. Strike a good balance between out-of-character chatting and light in-character roleplay.
-Keep responses to 1-2 short sentences. Never sound like an AI assistant."""
+Keep responses to 1-2 short sentences. Never sound like an AI assistant.
+If there is a specific recipient or player being addressed, always mention that player's name naturally in the reply."""
 
 # --- Engine Config Dictionaries ---
 CLASSIFIER_CONFIG = {"apiUrl": CLASSIFIER_API_URL, "apiKey": CLASSIFIER_API_KEY, "model": CLASSIFIER_MODEL}

@@ -486,18 +486,9 @@ class BotRAM:
 
         # Prepend the identity line (which contains the level!) to the stats
         fullStats = f"{botIdentity}. {botStats}" if botIdentity else botStats
-
         log("BOTRAM", f"EXTRACTED STATS: {fullStats!r}")
         
         if fullStats:
-            payload["finalSystem"] = (payload["finalSystem"] or "") + f"\n\n[YOUR CHARACTER STATS]: {fullStats}\nCRITICAL: If asked about your level, class, or spec, use ONLY these exact stats. Do not hallucinate numbers."
-        
-        # --- DEBUG: Verify stats extraction ---
-        log("BOTRAM", f"EXTRACTED STATS: {botStats!r}")
-        
-        if botStats:
-            # Prepend the identity line (which contains the level!) to the stats
-            fullStats = f"{botIdentity}. {botStats}" if botIdentity else botStats
             payload["finalSystem"] = (payload["finalSystem"] or "") + f"\n\n[YOUR CHARACTER STATS]: {fullStats}\nCRITICAL: If asked about your level, class, or spec, use ONLY these exact stats. Do not hallucinate numbers."
 
         # --- BUILD CLEAN ROLEPLAYER PROMPT ---

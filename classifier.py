@@ -333,19 +333,31 @@ def parseJson(raw):
     return {}
 
 def extractTrustedFact(cleanMsg, speaker):
+    if not cleanMsg:
+        return None
+
+    log("CLASSIFIER", f"Trusted fact statement: {cleanMsg!r}")
+
     prompt = FACT_EXTRACTION_PROMPT.replace("{statement}", cleanMsg)
+    prompt = prompt.replace("{statement} ", cleanMsg)
+
     options = {
-        "temperature": 0.1, 
+        "temperature": 0.1,
         "num_predict": 200 if FACT_EXTRACTION_THINK_ENABLED else 100,
         "think": FACT_EXTRACTION_THINK_ENABLED
     }
+
     raw = callLlm(CLASSIFIER_CONFIG, "", prompt, options).strip()
+    log("CLASSIFIER", f"Fact Extraction LLM Raw: {raw!r}")
+
     data = parseJson(raw)
-    entity = expandSlang(cleanEntityName(data.get("entity", "")))
-    fact = expandSlang(data.get("fact", ""))
+    entity = expandSlang(cleanEntityName(data.get("entity") or ""))
+    fact = expandSlang(data.get("fact") or "")
+
     if entity and fact:
         correctLoreWithTrustedFact(entity, fact)
         return fact
+
     return None
 
 def checkLoreRelevance(question, lore):
@@ -461,24 +473,53 @@ def injectGossipContext(payload, keywords, botRamInstance, isBackground=False):
     payload["finalSystem"] += gossipContext
     log("GOSSIP", f"Injected gossip context (background={isBackground}) | convoIds={convoIds}")     
 
+def _removeFactMarker(text, marker):
+    normalized = str(text or "").replace("’", "'").replace("‘", "'")
+    normalizedMarker = str(marker or "").replace("’", "'").replace("‘", "'").lower()
+
+    if not normalizedMarker:
+        return normalized.strip()
+
+    cleaned = re.sub(re.escape(normalizedMarker), "", normalized, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.!")
+    return cleaned
+
+def _normalizeFactText(text):
+    return (
+        str(text or "")
+        .lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("\u00a0", " ")
+    )
+
 def runClassifier(payload, botRamInstance):
     if payload.get("targetName") == "-ambient-":
         return
 
     playerMsg = payload.get("playerMsg", "")
     targetName = payload.get("targetName", "")
+    speakerName = str(payload.get("speakerName") or targetName or payload.get("playerName") or "").lower()
 
     if not playerMsg:
         return
 
     # 1. Trusted Fact Trigger ("that's a fact")
-    if targetName.lower() in TRUSTED_PLAYERS and TRUSTED_FACT_MARKER in playerMsg.lower():
-        cleanMsg = playerMsg.lower().replace(TRUSTED_FACT_MARKER, "").strip()
-        fact = extractTrustedFact(cleanMsg, targetName)
+    trustedPlayers = {str(p).lower() for p in TRUSTED_PLAYERS}
+    marker = _normalizeFactText(TRUSTED_FACT_MARKER)
+    normalizedMsg = _normalizeFactText(playerMsg)
+
+    if speakerName in trustedPlayers and marker in normalizedMsg:
+        cleanMsg = _removeFactMarker(playerMsg, TRUSTED_FACT_MARKER)
+        log("CLASSIFIER", f"Trusted Fact Trigger detected from {speakerName}. Extracting fact...")
+
+        fact = extractTrustedFact(cleanMsg, speakerName)
         if fact:
             payload["loreContext"] = f"\n\n[SYSTEM NOTE]: The player just established a new server fact: {fact}. Acknowledge it naturally."
             log("CLASSIFIER", f"Trusted Player established fact: {fact}")
-        return
+            return
+
+        log("CLASSIFIER", "Trusted Fact extraction returned null. Treating as normal message.")
 
     # 2. Concurrency Lock
     msgLock = getQueryLock(f"msg_{playerMsg}")
