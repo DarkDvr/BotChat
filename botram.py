@@ -432,29 +432,23 @@ class BotRAM:
         payload["convoId"] = convoId
         payload["isShortCircuit"] = isShortCircuit
         payload["memoryContext"] = memoryContext
-        payload["finalSystem"] = payload["rawSystem"] + memoryContext if memoryContext else payload["rawSystem"]
-
+        # We intentionally drop payload["rawSystem"] (the C++ module's generic prompt) 
+        # to avoid conflicting instructions. We rely entirely on ROLEPLAYER_SYSTEM_PROMPT.
+        baseSystem = memoryContext if memoryContext else ""
+        
         # --- META ROLEPLAYER PROMPT ---
-        # Sets the high-level behavior: Human playing a character, not an AI
-        baseSystem = payload["finalSystem"] or ""
-        payload["finalSystem"] = ROLEPLAYER_SYSTEM_PROMPT + "\n\n" + baseSystem
+        payload["finalSystem"] = ROLEPLAYER_SYSTEM_PROMPT
+        if baseSystem:
+            payload["finalSystem"] += "\n\n" + baseSystem
 
-        # --- ROLEPLAY GROUNDING RULES ---
-        roleplayRules = (
-            f"\n\n[CRITICAL ROLEPLAY RULES]:\n"
-            f"1. Identity: You are {botName.capitalize()}. ALWAYS use first-person pronouns (I, me, my). NEVER refer to yourself by your own name.\n"
-            f"2. Grounding: Only reference what was explicitly said. Do NOT invent, embellish, or add details (like items, stats, or events) that were not mentioned.\n"
-            f"3. Anti-echo: Do not repeat or paraphrase what other speakers just said. Give your own unique, natural reaction.\n"
-            f"4. Tone & Style: Respond like a real gamer in guild chat. Keep it short, casual, and terse (1-2 sentences max). Swearing, slang, and toxicity are fully allowed if they fit your personality or the current chat vibe.\n"
-            f"5. Awareness: Treat other speakers in the chat as fellow players/guildmates, not as guild names, factions, or game terms.\n"
-            f"6. Anti-AI: NEVER break character. Never say 'I don't have access to data' or 'I am an AI'. If you don't know something, just say 'idk' or 'never heard of it'."
-        )
-        payload["finalSystem"] = payload["finalSystem"] + roleplayRules
-
-        # --- EXTRACT BOT IDENTITY STATS ---
+        # --- EXTRACT BOT IDENTITY & PERSONALITY ---
         # The bot's level/class are in the opening identity line:
         identityMatch = re.search(r"^You are ([^.]+)\.", cleanPrompt, re.IGNORECASE)
         botIdentity = identityMatch.group(1).strip() if identityMatch else botName.capitalize()
+
+        # Extract the persona/lore text between the identity line and the stats blocks
+        personaMatch = re.search(r"^You are [^.]+\.\s*(.*?)(?=\s*Your Info:|\s*Player Info:|\s*NEW MESSAGE|\s*\w+ says:)", cleanPrompt, re.DOTALL | re.IGNORECASE)
+        botPersona = personaMatch.group(1).strip() if personaMatch else ""
 
         # Bot stats are after "Your Info:" but must stop before "Player Info:"
         infoMatch = re.search(
@@ -466,11 +460,9 @@ class BotRAM:
 
         # Defensive cleanup: never pass player stats into the bot's identity block
         botStats = re.sub(r"\bPlayer Info:.*", "", botStats, flags=re.DOTALL | re.IGNORECASE)
-
         # Remove overly narrow location/map fields from the stats block
         botStats = re.sub(r"\bLocation:\s*[^,.]*(?:,|\.)?", "", botStats, flags=re.IGNORECASE)
         botStats = re.sub(r"\bMap:\s*[^,.]*(?:,|\.)?", "", botStats, flags=re.IGNORECASE)
-        
         # Remove Zone from the raw string so we can append it cleanly at the end
         botStats = re.sub(r"\bZone:\s*[^,.]*(?:,|\.)?", "", botStats, flags=re.IGNORECASE)
         
@@ -488,6 +480,12 @@ class BotRAM:
         fullStats = f"{botIdentity}. {botStats}" if botIdentity else botStats
         log("BOTRAM", f"EXTRACTED STATS: {fullStats!r}")
         
+        # Inject Persona into System Prompt
+        if botPersona:
+            payload["finalSystem"] = (payload["finalSystem"] or "") + f"\n\n[YOUR CHARACTER PERSONALITY & LORE]:\n{botPersona}"
+            log("BOTRAM", "Injected bot persona/lore into system prompt.")
+
+        # Inject Stats into System Prompt
         if fullStats:
             payload["finalSystem"] = (payload["finalSystem"] or "") + f"\n\n[YOUR CHARACTER STATS]: {fullStats}\nCRITICAL: If asked about your level, class, or spec, use ONLY these exact stats. Do not hallucinate numbers."
 

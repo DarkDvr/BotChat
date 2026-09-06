@@ -39,10 +39,10 @@ def expandSlang(text):
     
     # Abbreviations that MUST match exact casing to avoid hitting English words
     # "an" != "AN", "hot" != "HoT", "dot" != "DoT", etc.
-    caseSensitive = {"an", "hot", "dot", "cd", "ms", "os"}
+    caseSensitive = {"an", "hot", "dot", "cd", "ms", "os", "if"}
     exactCasing = {
         "an": "AN", "hot": "HoT", "dot": "DoT",
-        "cd": "CD", "ms": "MS", "os": "OS"
+        "cd": "CD", "ms": "MS", "os": "OS", "if": "IF"
     }
     
     words = text.split()

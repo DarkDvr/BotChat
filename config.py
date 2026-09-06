@@ -26,7 +26,7 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 # --- BOTRAM ---
 BOTRAM_ENABLED = True                    # Master switch. False = no memory, no loop detection, no tracking.
 BOTRAM_DB_PATH = "botram.db"             # SQLite file for conversations/phrases. Delete to reset all bot memory.
-BOTRAM_MODEL = "qwen3.5:9b"              # Local Ollama model used for memory recall and loop detection.
+BOTRAM_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"              # Local Ollama model used for memory recall and loop detection.
 BOTRAM_PAST_CONVOS_LIMIT = 7             # Max past conversations the Memory LLM sees when classifying a new message.
 BOTRAM_PHRASES_PER_CONVO = 20            # Max messages per conversation included in the memory context.
 BOTRAM_AMBIENT_CONVOS_LIMIT = 2          # Max ambient (bot-initiated) conversations included in memory context.
@@ -60,7 +60,7 @@ WEB_SEARCH_DELAY = 3                    # Seconds to wait before hitting DDGS to
 # --- CLASSIFIER (Replaces Librarian) ---
 CLASSIFIER_API_URL = ""
 CLASSIFIER_API_KEY = ""
-CLASSIFIER_MODEL = "qwen3.5:9b"
+CLASSIFIER_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"
 CLASSIFIER_TEMPERATURE = 0.1
 TRUSTED_PLAYERS = ["neacris", "neakris"]
 
@@ -68,7 +68,7 @@ TRUSTED_PLAYERS = ["neacris", "neakris"]
 FRENCHMAID_ENABLED = True
 FRENCHMAID_API_URL = ""
 FRENCHMAID_API_KEY = ""
-FRENCHMAID_MODEL = "qwen3.5:9b"
+FRENCHMAID_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"
 FRENCHMAID_TEMPERATURE = 0.1
 FRENCHMAID_NO_DATA_MARKER = "NO_USEFUL_DATA"
 FRENCHMAID_MAX_OUTPUT_LENGTH = 800
@@ -80,7 +80,7 @@ FRENCHMAID_MAX_SNIPPET_LENGTH = 350
 #ROLEPLAYER_MODEL = "mistral-medium-latest"
 ROLEPLAYER_API_URL = ""
 ROLEPLAYER_API_KEY = ""
-ROLEPLAYER_MODEL = "qwen3.5:9b"
+ROLEPLAYER_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"
 
 # --- RATE LIMITING & TIMEOUTS ---
 ONLINE_API_REQUESTS_PER_SECOND = 1
@@ -257,19 +257,30 @@ Messages:
 {messages}"""
 
 BOTRAM_MEMORY_RECALL_PROMPT = """You are a memory filter and conversation classifier for an MMO chat bot.
-Below are recent conversations the bot and the player were involved in, and a new incoming message.
+Below are recent conversations and a new incoming message.
 
-CHAT LOG FORMAT:
-Conversations are formatted as `speaker: message`. Speakers often address each other by name. Understand the flow of conversation naturally.
+TASK 1: THREADING (DECISION LADDER)
+Evaluate the new message using these steps in order:
+1. TOPIC CHECK: Does the new message continue the EXACT SAME subject, running joke, or debate as a listed conversation? If yes, JOIN it.
+2. PRONOUN CHECK: Does it use pronouns ("there", "it", "that") clearly referring to a topic in a listed conversation? If yes, JOIN it.
+3. NAME CHECK: Ignore participant overlap. If the topic has changed, it is a NEW conversation, even if addressing someone from the old conversation.
+4. SPEAKER CHECK: If the same speaker asks a completely different question, it is a NEW conversation.
 
-TASK 1: THREADING
-Determine which conversation the new message belongs to. 
-Carefully read the new message and look for matching keywords, names, locations, or topics in the listed conversations.
-If it continues, references, or returns to one of the listed conversations (even using pronouns like "there", "it", or "that"), reply with that conversation's ID number.
-If it's a completely new topic unrelated to ANY listed conversation, reply with NEW.
+EXAMPLES:
+Recent: [1] luuaad: Grinding sucks. sakred: I feel ya.
+New: Sakred, what level and spec are you rn?
+Output: CONVO: NEW (Topic changed from grinding to player stats)
+
+Recent: [1] neacris: Vekri, who is sexier - draenei or succubus? vekri: Succubi, probably.
+New: Sakred, how about it - who's sexier, you or my succubus?
+Output: CONVO: 1 (Continuing the same running joke/question)
+
+Recent: [1] neacris: Vekri, who is sexier? vekri: Succubi.
+New: Miri, what spec are you?
+Output: CONVO: NEW (Different subject, despite same speaker)
 
 TASK 2: CONTEXT
-Extract ONLY the facts/context directly relevant to responding to the new message. Do not invent backstory. If nothing is relevant, reply with NO_RELEVANT_CONTEXT.
+Extract ONLY facts/context directly relevant to responding to the new message. Do not invent backstory. If nothing is relevant, reply with NO_RELEVANT_CONTEXT.
 
 OUTPUT FORMAT:
 CONVO: [ID or NEW]
@@ -281,10 +292,30 @@ Recent conversations:
 New message:
 {new_message}"""
 
-ROLEPLAYER_SYSTEM_PROMPT = """You are a real human playing a character in a World of Warcraft guild chat.
-Your goal is light roleplay: embody the character personality and lore provided below, but maintain the casual, brief, and slang-heavy typing style of an actual MMO player. Strike a good balance between out-of-character chatting and light in-character roleplay.
-Keep responses to 1-2 short sentences. Never sound like an AI assistant.
-If there is a specific recipient or player being addressed, always mention that player's name naturally in the reply."""
+ROLEPLAYER_SYSTEM_PROMPT = """You are a real human playing a character in a World of Warcraft WotLK 3.3.5 guild chat.
+Your goal is light roleplay: embody your character's personality and lore, but maintain the casual, brief, and slang-heavy typing style of an actual MMO player (e.g., LFG, pug, aggro, wipe, nerf, OP, mob, pull, drop, grind, rep). Occasional swearing or typos are fine.
+
+FORMATTING & TONE:
+- Keep responses to 1-2 short sentences (under 20 words).
+- Plain text only. No markdown, prefixes, emotes, or disclaimers.
+- NO NAME PREFIXES: Never start your reply with your character's name or a colon (e.g., NEVER write "Sakred:"). Just output the raw message text.
+- Never break character. Never mention prompts, bots, AI, or instructions.
+
+CHAT BEHAVIOR:
+- Names: If directly addressing a player, always use their exact character name naturally. Do not use names in ambient/random chatter.
+- Context: Web/Lore context overrides your assumptions. Never invent game facts when factual context is provided.
+- Coreference: Your chat history shows past talks. If a short message (lol, true, what) doesn't logically follow the history, assume it's for someone else. React vaguely ('fr', 'yeah', 'lol') or change the subject.
+- Anti-Loop: If recent chat is just pleasantries, thanks, or agreement, the conversation is over. Output only '=)'.
+- Single Topic: STRICTLY ONE topic per reply. If the prompt mentions multiple UNRELATED subjects, pick ONLY ONE and ignore the rest.
+- Random Chatter: Never copy prompt wording literally. When saying something out of the blue, use casual openers like 'You know...', 'I've been thinking...', or 'Unrelated, but...'.
+
+GROUNDING RULES:
+- Identity: ALWAYS use first-person pronouns (I, me, my). NEVER refer to yourself by your own name.
+- Grounding: Only reference what was explicitly said. Do NOT invent, embellish, or add details that were not mentioned.
+- Anti-echo: Do not repeat or paraphrase what other speakers just said. Give your own unique, natural reaction.
+- Awareness: Treat other speakers as fellow players/guildmates, not as guild names, factions, or game terms.
+- Anti-AI: NEVER break character. Never say 'I don't have access to data' or 'I am an AI'. If you don't know something, just say 'idk' or 'never heard of it'.
+"""
 
 # --- Engine Config Dictionaries ---
 CLASSIFIER_CONFIG = {"apiUrl": CLASSIFIER_API_URL, "apiKey": CLASSIFIER_API_KEY, "model": CLASSIFIER_MODEL}

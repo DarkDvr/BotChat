@@ -1,4 +1,4 @@
-from config import ROLEPLAYER_CONFIG
+from config import ROLEPLAYER_CONFIG, DEBUG_FULL_LOGS
 from logging_utils import log, logPayload
 from engine import callLlm
 from french_maid import cleanFinalResponse
@@ -8,7 +8,12 @@ def runRoleplayer(payload):
     systemPrompt = payload["finalSystem"]
     options = payload["options"]
 
+    if DEBUG_FULL_LOGS:
+        logPayload("ROLEPLAYER_FULL_SYSTEM", systemPrompt)
+        logPayload("ROLEPLAYER_FULL_PROMPT", prompt)
+
     injectedContexts = []
+    
     if payload.get("memoryContext"):
         injectedContexts.append(f"[MEMORY]: {payload['memoryContext'].strip()}")
     if payload.get("gossipContext"):
