@@ -310,7 +310,12 @@ class BotRAM:
         isEvent = False
 
         msgMatch = re.search(r"NEW MESSAGE from \w+:\s*(.*?)\s*\w+ says:", cleanPrompt, re.DOTALL)
-        if not msgMatch: msgMatch = re.search(r"\w+ says:\s*'(.*?)'", cleanPrompt)
+        if not msgMatch: 
+            # Match up to the closing quote followed by a period and the next prompt section
+            msgMatch = re.search(r"\w+ says:\s*'(.*?)'\.\s*(?:Your Info:|Player Info:|NEW MESSAGE|Event:)", cleanPrompt, re.DOTALL)
+        if not msgMatch: 
+            # Fallback for ambient/weird formats: match up to quote + period
+            msgMatch = re.search(r"\w+ says:\s*'(.*?)'\.", cleanPrompt, re.DOTALL)
         if not msgMatch:
             msgMatch = re.search(r"Event:\s*(.*?)(?=\.\s+React|\.\s+Avoid|\.\s+You are playing|$)", cleanPrompt, re.DOTALL)
             if msgMatch: isEvent = True

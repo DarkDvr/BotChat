@@ -24,43 +24,43 @@ PROXY_PORT = 8000
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 
 # --- BOTRAM ---
-BOTRAM_ENABLED = True                    # Master switch. False = no memory, no loop detection, no tracking.
-BOTRAM_DB_PATH = "botram.db"             # SQLite file for conversations/phrases. Delete to reset all bot memory.
-BOTRAM_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"              # Local Ollama model used for memory recall and loop detection.
-BOTRAM_PAST_CONVOS_LIMIT = 7             # Max past conversations the Memory LLM sees when classifying a new message.
-BOTRAM_PHRASES_PER_CONVO = 20            # Max messages per conversation included in the memory context.
-BOTRAM_AMBIENT_CONVOS_LIMIT = 2          # Max ambient (bot-initiated) conversations included in memory context.
-BOTRAM_AMBIENT_JOIN_MINUTES = 5          # Ambient messages join an existing convo if it was updated within this window.
-BOTRAM_RETENTION_DAYS = 7                # Conversations older than this are permanently deleted on startup.
-BOTRAM_ACTIVE_WINDOW_MINUTES = 3         # Ambient memory context only includes conversations updated within this window.
-BOTRAM_MEMORY_WINDOW_MINUTES = 10        # Target-specific memory recall only includes conversations within this window.
-BOTRAM_LOOP_CHECK_THRESHOLD = 4          # Minimum message count before loop detection can trigger.
-BOTRAM_LOOP_CHECK_INTERVAL = 4           # After threshold, run loop detection every N messages (e.g. at 8, 12, 16...).
-BOTRAM_LOOP_COOLDOWN_MINUTES = 15        # Looped conversations stay locked/silent for this long before resurrection.
-BOTRAM_TRANSCRIPT_WINDOW = 5             # Number of phrases to grab before/after an FTS5 keyword match.
+BOTRAM_ENABLED = True                               # Master switch. False = no memory, no loop detection, no tracking.
+BOTRAM_DB_PATH = "botram.db"                        # SQLite file for conversations/phrases. Delete to reset all bot memory.
+BOTRAM_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"     # Local Ollama model used for memory recall and loop detection.
+BOTRAM_PAST_CONVOS_LIMIT = 7                        # Max past conversations the Memory LLM sees when classifying a new message.
+BOTRAM_PHRASES_PER_CONVO = 20                       # Max messages per conversation included in the memory context.
+BOTRAM_AMBIENT_CONVOS_LIMIT = 2                     # Max ambient (bot-initiated) conversations included in memory context.
+BOTRAM_AMBIENT_JOIN_MINUTES = 5                     # Ambient messages join an existing convo if it was updated within this window.
+BOTRAM_RETENTION_DAYS = 7                           # Conversations older than this are permanently deleted on startup.
+BOTRAM_ACTIVE_WINDOW_MINUTES = 3                    # Ambient memory context only includes conversations updated within this window.
+BOTRAM_MEMORY_WINDOW_MINUTES = 10                   # Target-specific memory recall only includes conversations within this window.
+BOTRAM_LOOP_CHECK_THRESHOLD = 4                     # Minimum message count before loop detection can trigger.
+BOTRAM_LOOP_CHECK_INTERVAL = 4                      # After threshold, run loop detection every N messages (e.g. at 8, 12, 16...).
+BOTRAM_LOOP_COOLDOWN_MINUTES = 15                   # Looped conversations stay locked/silent for this long before resurrection.
+BOTRAM_TRANSCRIPT_WINDOW = 5                        # Number of phrases to grab before/after an FTS5 keyword match.
 
 # --- GOSSIP / SERVER CONTEXT ---
-BOTRAM_GOSSIP_ENABLED = True        # Master switch for server-gossip context retrieval.
-BOTRAM_GOSSIP_WINDOW_HOURS = 24     # Scan chat history this many hours back for gossip.
-BOTRAM_GOSSIP_MAX_CONVOS = 3        # Top conversations passed to gossip summarizer.
-BOTRAM_GOSSIP_MAX_PHRASES = 100     # Hard total phrase cap to protect model context.
-BOTRAM_GOSSIP_MIN_SCORE = 2         # Minimum unique keyword matches needed to consider convo.
-BOTRAM_GOSSIP_MAX_KEYWORDS = 5      # Maximum keywords used from classifier output.
+BOTRAM_GOSSIP_ENABLED = True                        # Master switch for server-gossip context retrieval.
+BOTRAM_GOSSIP_WINDOW_HOURS = 24                     # Scan chat history this many hours back for gossip.
+BOTRAM_GOSSIP_MAX_CONVOS = 3                        # Top conversations passed to gossip summarizer.
+BOTRAM_GOSSIP_MAX_PHRASES = 100                     # Hard total phrase cap to protect model context.
+BOTRAM_GOSSIP_MIN_SCORE = 2                         # Minimum unique keyword matches needed to consider convo.
+BOTRAM_GOSSIP_MAX_KEYWORDS = 5                      # Maximum keywords used from classifier output.
 
 # --- LORE DB (The Wiki) ---
 LORE_DB_PATH = "lore.db"
-TRUSTED_FACT_MARKER = "that's a fact"    # Strict semantic trigger for Trusted Players to write to the Wiki.
+TRUSTED_FACT_MARKER = "that's a fact"               # Strict semantic trigger for Trusted Players to write to the Wiki.
 
 # --- Web Search ---
 WEB_SEARCH_QUERY_PREFIX = "wowhead wow classic"
-WEB_SEARCH_EXCLUDED_TERMS = ""          # Python filters
-SEARCH_RESULT_COUNT = 15                # Cast a wider net to ensure we catch the right snippet
-WEB_SEARCH_DELAY = 3                    # Seconds to wait before hitting DDGS to avoid soft-blocks
+WEB_SEARCH_EXCLUDED_TERMS = ""                      # Python filters
+SEARCH_RESULT_COUNT = 15                            # Cast a wider net to ensure we catch the right snippet
+WEB_SEARCH_DELAY = 3                                # Seconds to wait before hitting DDGS to avoid soft-blocks
 
 # --- CLASSIFIER (Replaces Librarian) ---
 CLASSIFIER_API_URL = ""
 CLASSIFIER_API_KEY = ""
-CLASSIFIER_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"
+CLASSIFIER_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"
 CLASSIFIER_TEMPERATURE = 0.1
 TRUSTED_PLAYERS = ["neacris", "neakris"]
 
@@ -68,7 +68,7 @@ TRUSTED_PLAYERS = ["neacris", "neakris"]
 FRENCHMAID_ENABLED = True
 FRENCHMAID_API_URL = ""
 FRENCHMAID_API_KEY = ""
-FRENCHMAID_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"
+FRENCHMAID_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"
 FRENCHMAID_TEMPERATURE = 0.1
 FRENCHMAID_NO_DATA_MARKER = "NO_USEFUL_DATA"
 FRENCHMAID_MAX_OUTPUT_LENGTH = 800
@@ -80,7 +80,7 @@ FRENCHMAID_MAX_SNIPPET_LENGTH = 350
 #ROLEPLAYER_MODEL = "mistral-medium-latest"
 ROLEPLAYER_API_URL = ""
 ROLEPLAYER_API_KEY = ""
-ROLEPLAYER_MODEL = "RoseRudolph/rudy-nemo-12b-v1:latest"
+ROLEPLAYER_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"
 
 # --- RATE LIMITING & TIMEOUTS ---
 ONLINE_API_REQUESTS_PER_SECOND = 1
@@ -248,8 +248,8 @@ RULES:
 BOTRAM_LOOP_PROMPT = """You are a loop detector for a WoW chat room. Analyze the recent messages.
 
 RULES:
-- Reply LOOP if bots are repeating the exact same sentences or recycling concepts endlessly.
-- Reply CONTINUE if the conversation is progressing or just exchanging short acknowledgments.
+- Reply LOOP if conversation is going nowhere and players are just essentially repeating same stuff.
+- Reply CONTINUE if the conversation is progressing with new ideas or has changed direction.
 
 Reply ONLY with "LOOP" or "CONTINUE".
 
@@ -259,28 +259,7 @@ Messages:
 BOTRAM_MEMORY_RECALL_PROMPT = """You are a memory filter and conversation classifier for an MMO chat bot.
 Below are recent conversations and a new incoming message.
 
-TASK 1: THREADING (DECISION LADDER)
-Evaluate the new message using these steps in order:
-1. TOPIC CHECK: Does the new message continue the EXACT SAME subject, running joke, or debate as a listed conversation? If yes, JOIN it.
-2. PRONOUN CHECK: Does it use pronouns ("there", "it", "that") clearly referring to a topic in a listed conversation? If yes, JOIN it.
-3. NAME CHECK: Ignore participant overlap. If the topic has changed, it is a NEW conversation, even if addressing someone from the old conversation.
-4. SPEAKER CHECK: If the same speaker asks a completely different question, it is a NEW conversation.
-
-EXAMPLES:
-Recent: [1] luuaad: Grinding sucks. sakred: I feel ya.
-New: Sakred, what level and spec are you rn?
-Output: CONVO: NEW (Topic changed from grinding to player stats)
-
-Recent: [1] neacris: Vekri, who is sexier - draenei or succubus? vekri: Succubi, probably.
-New: Sakred, how about it - who's sexier, you or my succubus?
-Output: CONVO: 1 (Continuing the same running joke/question)
-
-Recent: [1] neacris: Vekri, who is sexier? vekri: Succubi.
-New: Miri, what spec are you?
-Output: CONVO: NEW (Different subject, despite same speaker)
-
-TASK 2: CONTEXT
-Extract ONLY facts/context directly relevant to responding to the new message. Do not invent backstory. If nothing is relevant, reply with NO_RELEVANT_CONTEXT.
+Use common sense to figure out if given phrase belongs to one of the conversations below, or is talking about some other topic. Focus on the current topic, participants are less important.
 
 OUTPUT FORMAT:
 CONVO: [ID or NEW]
@@ -292,7 +271,20 @@ Recent conversations:
 New message:
 {new_message}"""
 
-ROLEPLAYER_SYSTEM_PROMPT = """You are a real human playing a character in a World of Warcraft WotLK 3.3.5 guild chat.
+ROLEPLAYER_SYSTEM_PROMPT = """You're a real human playing a World of Warcraft WotLK 3.3.5 character, chatting in game chat. You're just a regular gamer, not an AI. 
+
+Keep your replies very short and casual: usually just one or two sentences. Use normal MMO slang (pug, wipe, aggro, grind, OP) where it's justified and don't worry about perfect grammar or occasional swearing. Just react naturally to what's being said. Always speak in the first person ("I", "my") and never refer to yourself by your character's name. Never start your message with your name or a colon. 
+
+Never parrot back what other players just said; give your own genuine reaction. 
+Never greet people, you already know everyone in chat. 
+Never invite anyone to go anywhere - nobody likes that.
+Never identify yourself at the beginning of your response, just output the phrase itself.
+Chat in accordance with your given character's personality. 
+
+If you're given factual context about the game, stick to it and don't make things up. If the conversation is just winding down with pleasantries, just drop a quick "np", "fr", or a simple "=)". Plain text only, no markdown, and never break character or admit you're a bot."""
+
+
+ROLEPLAYER_SYSTEM_PROMPT_OLD = """You are a real human playing a character in a World of Warcraft WotLK 3.3.5 guild chat.
 Your goal is light roleplay: embody your character's personality and lore, but maintain the casual, brief, and slang-heavy typing style of an actual MMO player (e.g., LFG, pug, aggro, wipe, nerf, OP, mob, pull, drop, grind, rep). Occasional swearing or typos are fine.
 
 FORMATTING & TONE:
