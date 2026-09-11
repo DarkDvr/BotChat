@@ -3,7 +3,7 @@ import threading
 import requests
 import re
 from config import (
-    OLLAMA_URL, OLLAMA_TIMEOUT, ONLINE_API_TIMEOUT, 
+    LLM_URL, LLM_TIMEOUT, ONLINE_API_TIMEOUT, 
     ONLINE_API_REQUESTS_PER_SECOND, CACHE_TTL
 )
 from logging_utils import log
@@ -85,31 +85,51 @@ def stripThinkTags(text):
         return text
     return re.sub(r'', '', text, flags=re.DOTALL).strip()
 
-def callOllama(model, systemPrompt, userPrompt, options):
+def callLLM(model, systemPrompt, userPrompt, options):
     thinkMode = options.get("think", False)
+    
+    # Bionic / LM Studio uses the OpenAI-compatible chat completions format
+    messages = []
+    if systemPrompt:
+        messages.append({"role": "system", "content": systemPrompt})
+    messages.append({"role": "user", "content": userPrompt})
+
     payload = {
         "model": model,
-        "prompt": userPrompt,
-        "system": systemPrompt,
+        "messages": messages,
         "stream": False,
-        "think": thinkMode,
-        "options": {
-            "temperature": options.get("temperature", 0.7),
-            "num_predict": options.get("num_predict", 256)
-        },
+        "temperature": options.get("temperature", 0.7),
+        "max_tokens": options.get("num_predict", 256),
     }
+    
+    # Ensure we hit the exact chat completions endpoint
+    url = LLM_URL.rstrip("/")
+    if not url.endswith("/chat/completions"):
+        url += "/chat/completions"
+
     try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
+        # Bionic JIT loading might take a few extra seconds on the very first request
+        resp = requests.post(url, json=payload, timeout=max(LLM_TIMEOUT, 120))
         resp.raise_for_status()
-        response = resp.json().get("response", "")
+        
+        # Parse OpenAI response format
+        response_data = resp.json()
+        response = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        
         if thinkMode:
             response = stripThinkTags(response)
         return response
+        
+    except requests.exceptions.HTTPError as e:
+        log("LLM", f"LLM HTTP error ({model}): {e}")
+        if e.response is not None:
+            log("LLM", f"Bionic error details: {e.response.text}")
+        return ""
     except Exception as e:
-        log("OLLAMA", f"Ollama error ({model}): {e}")
+        log("LLM", f"LLM connection error ({model}): {e}")
         return ""
 
 def callLlm(engine, systemPrompt, userPrompt, options):
     if engine["apiUrl"] and engine["apiKey"]:
         return callOnlineApi(engine["apiUrl"], engine["apiKey"], engine["model"], systemPrompt, userPrompt, options)
-    return callOllama(engine["model"], systemPrompt, userPrompt, options)
+    return callLLM(engine["model"], systemPrompt, userPrompt, options)

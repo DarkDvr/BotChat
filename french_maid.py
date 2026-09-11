@@ -93,6 +93,10 @@ def cleanWowLinks(text):
 def cleanFinalResponse(text):
     if not text: return "Hmm... "
     
+    # Replace double quotes with single quotes to prevent the C++ module's chat parser 
+    # from splitting the message into fragments.
+    text = text.replace('"', "'")
+    
     # Strip Markdown formatting
     text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)  # Bold
     text = re.sub(r"\*(.*?)\*", r"\1", text)      # Italics
@@ -132,6 +136,6 @@ def validateConfig():
         if hasUrl and hasKey:
             log("CONFIG", f"{name}: ONLINE model '{cfg['model']}'")
         elif hasUrl or hasKey:
-            log("CONFIG", f"WARNING: {name} partial API config. Falling back to local Ollama '{cfg['model']}'.")
+            log("CONFIG", f"WARNING: {name} partial API config. Falling back to local LLM '{cfg['model']}'.")
         else:
-            log("CONFIG", f"{name}: LOCAL Ollama model '{cfg['model']}'")
+            log("CONFIG", f"{name}: LOCAL LLM model '{cfg['model']}'")

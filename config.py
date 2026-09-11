@@ -5,7 +5,7 @@
 VERSION = "11.3"
 
 # --- Thinking Mode Toggles ---
-# Enable Ollama thinking mode for complex analytical tasks. 
+# Enable LLM thinking mode for complex analytical tasks. 
 # Bumps token limits automatically when enabled.
 CLASSIFIER_THINK_ENABLED = False
 FACT_EXTRACTION_THINK_ENABLED = False
@@ -13,7 +13,7 @@ LORE_CORRECTION_THINK_ENABLED = False
 
 # --- Logging ---
 ENABLE_LOG_COLORS = False
-DEBUG_FULL_LOGS = True
+DEBUG_FULL_LOGS = False
 MAX_LOG_CHARS = 1500
 LOG_DIR = "logs"
 LOG_DATE_FORMAT = "%d-%m-%Y %H:%M:%S"
@@ -21,12 +21,12 @@ LOG_DATE_FORMAT = "%d-%m-%Y %H:%M:%S"
 # --- Proxy server ---
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 8000
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+LLM_URL = "http://localhost:1234/v1"
 
 # --- BOTRAM ---
 BOTRAM_ENABLED = True                               # Master switch. False = no memory, no loop detection, no tracking.
 BOTRAM_DB_PATH = "botram.db"                        # SQLite file for conversations/phrases. Delete to reset all bot memory.
-BOTRAM_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"     # Local Ollama model used for memory recall and loop detection.
+BOTRAM_MODEL = "gemma-2-ataraxy-9b"                 # Local LLM model used for memory recall and loop detection.
 BOTRAM_PAST_CONVOS_LIMIT = 7                        # Max past conversations the Memory LLM sees when classifying a new message.
 BOTRAM_PHRASES_PER_CONVO = 20                       # Max messages per conversation included in the memory context.
 BOTRAM_AMBIENT_CONVOS_LIMIT = 2                     # Max ambient (bot-initiated) conversations included in memory context.
@@ -38,6 +38,7 @@ BOTRAM_LOOP_CHECK_THRESHOLD = 4                     # Minimum message count befo
 BOTRAM_LOOP_CHECK_INTERVAL = 4                      # After threshold, run loop detection every N messages (e.g. at 8, 12, 16...).
 BOTRAM_LOOP_COOLDOWN_MINUTES = 15                   # Looped conversations stay locked/silent for this long before resurrection.
 BOTRAM_TRANSCRIPT_WINDOW = 5                        # Number of phrases to grab before/after an FTS5 keyword match.
+BOTRAM_TRUSTED_IDLE_LIMIT = 6                       # Close convo if no trusted player spoke for this many messages. 0 = disabled.
 
 # --- GOSSIP / SERVER CONTEXT ---
 BOTRAM_GOSSIP_ENABLED = True                        # Master switch for server-gossip context retrieval.
@@ -60,7 +61,7 @@ WEB_SEARCH_DELAY = 3                                # Seconds to wait before hit
 # --- CLASSIFIER (Replaces Librarian) ---
 CLASSIFIER_API_URL = ""
 CLASSIFIER_API_KEY = ""
-CLASSIFIER_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"
+CLASSIFIER_MODEL = "gemma-2-ataraxy-9b"
 CLASSIFIER_TEMPERATURE = 0.1
 TRUSTED_PLAYERS = ["neacris", "neakris"]
 
@@ -68,7 +69,7 @@ TRUSTED_PLAYERS = ["neacris", "neakris"]
 FRENCHMAID_ENABLED = True
 FRENCHMAID_API_URL = ""
 FRENCHMAID_API_KEY = ""
-FRENCHMAID_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"
+FRENCHMAID_MODEL = "gemma-2-ataraxy-9b"
 FRENCHMAID_TEMPERATURE = 0.1
 FRENCHMAID_NO_DATA_MARKER = "NO_USEFUL_DATA"
 FRENCHMAID_MAX_OUTPUT_LENGTH = 800
@@ -80,12 +81,12 @@ FRENCHMAID_MAX_SNIPPET_LENGTH = 350
 #ROLEPLAYER_MODEL = "mistral-medium-latest"
 ROLEPLAYER_API_URL = ""
 ROLEPLAYER_API_KEY = ""
-ROLEPLAYER_MODEL = "vanilj/gemma-2-ataraxy-9b:Q8_0"
+ROLEPLAYER_MODEL = "gemma-2-ataraxy-9b"
 
 # --- RATE LIMITING & TIMEOUTS ---
 ONLINE_API_REQUESTS_PER_SECOND = 1
 ONLINE_API_TIMEOUT = 60
-OLLAMA_TIMEOUT = 45
+LLM_TIMEOUT = 45
 
 # --- BREAK ON STRINGS ---
 # List of exact strings that, if found in a player message, will cause the system to immediately discard the message.
@@ -137,7 +138,7 @@ FIELDS:
 - "keywords": 2-5 important proper nouns/phrases for gossip lookup (zones, players, raids, events).
 
 OUTPUT FORMAT:
-Reply with ONLY one JSON object. No markdown, no code fences.
+Reply with ONLY the raw JSON object. Do NOT use markdown code blocks (no ```json). Do NOT include any conversational filler, greetings, or explanations. Your entire response must start with { and end with }.
 {"intent": "game_question", "topic": "search query", "entity": "Zone Name or NPC Name", "keywords": ["keyword1", "keyword2"]}
 {"intent": "social_question", "topic": "search keywords", "entity": null, "keywords": ["keyword1"]}
 {"intent": "statement", "topic": null, "entity": null, "keywords": ["keyword1"]}"""
@@ -179,31 +180,18 @@ CHAT LOG SNIPPET:
 
 YOUR ANSWER:"""
 
-FACT_EXTRACTION_PROMPT = """You are a fact extraction engine for a World of Warcraft chat system.
-A trusted player has stated or corrected a game fact. Extract the SINGLE most important game fact.
+FACT_EXTRACTION_PROMPT = """You extract core WoW game facts from trusted player statements into a clean JSON object.
 
 RULES:
-- ENTITY must be a clean proper noun (max 3 words).
-- HIERARCHY: If the fact is about a sub-location, camp, flight path, or landmark, the entity MUST be the parent Zone.
-- FACT CONTENT: If you group under a parent Zone, the fact string MUST include the sub-location's name so the data isn't lost.
-- Discard roleplay, combat descriptions, flavor text, and throwaway complaints.
-- If no significant, useful game fact is present, return null for both fields.
-
-EXAMPLES:
-Statement: "Closest flight point to Zul'Gurub is Rebel Camp in Stranglethorn Vale, that's a fact."
-Output: {"entity": "Stranglethorn Vale", "fact": "Rebel Camp is the closest flight point to Zul'Gurub."}
-
-Statement: "Deepfury Bracers are item level 55, that's a fact."
-Output: {"entity": "Deepfury Bracers", "fact": "Item level is 55."}
-
-Statement: "You noob, Sentinel Hill is in Westfall, west of Darkshire, and that's a fact."
-Output: {"entity": "Westfall", "fact": "Sentinel Hill is located west of Darkshire."}
-
-Statement: "I finally hit 60! that's a fact."
-Output: {"entity": null, "fact": null}
+- "entity": The main proper noun (Zone, NPC, Item, Quest). Max 3 words. If it's a sub-location, use the parent Zone.
+- "fact": A single, clear sentence stating the fact. Include the sub-location name if you used the parent Zone as the entity.
+- Ignore roleplay, flavor text, and complaints.
+- If there is no useful game fact, return null for both.
 
 OUTPUT FORMAT:
-Reply with ONLY the JSON object. No markdown.
+Reply with ONLY the raw JSON object. Do NOT use markdown code blocks (no ```json). Do NOT include any conversational filler. Your entire response must start with { and end with }.
+{"entity": "Stranglethorn Vale", "fact": "Rebel Camp is the closest flight path to Zul'Gurub."}
+
 Statement: {statement}"""
 
 LORE_CORRECTION_PROMPT = """You are a fact-checking engine for a WoW knowledge base.
@@ -214,56 +202,59 @@ NEW CORRECTED FACT from a trusted player:
 {new_fact}
 
 Does any existing fact CONTRADICT the new corrected fact?
-If YES: Output the EXACT line from the existing facts that should be replaced. Output ONLY that line.
-If NO: Output exactly: APPEND"""
+If YES: Output the EXACT line from the existing facts that should be replaced. Nothing else.
+If NO: Output exactly and only the single word: APPEND
+
+Do not include any explanations, greetings, quotes, or punctuation."""
 
 LORE_ARCHIVIST_SYSTEM_PROMPT = """You are a database archivist for a WoW knowledge base.
-Extract ONLY concrete, atomic game facts from raw search results for the provided Entity.
+Extract concrete game facts from raw search results for the provided Entity.
 
 RULES:
-- Output exactly 1 clear sentence, maximum 15 words. No markdown, no prefixes.
-- You MUST include the Entity name in the output fact so it is self-contained.
-- Do not equate the Entity with an object inside it (e.g., write "Sentinel Hill has an inn", not "Sentinel Hill is an inn").
+- Prioritize critical gameplay info: quest objectives, locations, NPCs, and mechanics. Ignore trivial numbers like XP or minor gold rewards unless that is the only info available.
+- Output 1-3 short, clear sentences. No markdown, no prefixes.
+- You MUST include the Entity name in the output so it is self-contained.
 - If the text lacks a concrete fact or is about a completely different entity, output exactly: NO_USEFUL_DATA
-- If an era is specified (Vanilla, TBC), include it in the fact.
 
 EXAMPLES:
-Entity: Western Plaguelands | Raw: "Alliance players can fly to Western Plaguelands from Chillwind Camp."
-Output: Western Plaguelands alliance flight path is at Chillwind Camp.
+Entity: Stratholme | Raw: "Use Egan's Blaster on 15 ghostly citizens. Reward is 9k exp."
+Output: The Stratholme quest "The Restless Souls" requires using Egan's Blaster to free 15 ghostly citizens.
 
-Entity: Western Plaguelands | Raw: "Level range: 46-57."
-Output: Western Plaguelands level range is 46-57.
+Entity: Westfall | Raw: "Sentinel Hill is the flight point. Level range 10-20."
+Output: Sentinel Hill is the flight point for Westfall. The zone level range is 10-20.
 
-Execute extraction. Output ONLY the fact or NO_USEFUL_DATA."""
+Execute extraction. Output ONLY the facts or NO_USEFUL_DATA."""
 
 FRENCHMAID_SYSTEM_PROMPT = """You are "FrenchMaid", a data-cleaning assistant for a WoW Classic server.
-Extract ONLY explicit facts from the search results that directly answer the search query provided by the user.
+Your goal is to find the EXACT answer to the user's specific question in the search results.
 
 RULES:
-- If the exact answer is NOT explicitly stated in the text, reply exactly: NO_USEFUL_DATA
-- Do NOT guess, infer travel routes, or invent information.
+- If the text does NOT explicitly answer the specific question asked, reply exactly: NO_USEFUL_DATA.
+- Do NOT just extract keywords or loosely related facts. If the user asks "how to destroy X", and the text only says "X is located in Y", that is NO_USEFUL_DATA.
+- Do NOT guess, infer, or combine information from different unrelated results.
 - Keep it concise: a few short plain-text bullet points.
 - Translate foreign languages to English."""
 
 BOTRAM_LOOP_PROMPT = """You are a loop detector for a WoW chat room. Analyze the recent messages.
 
 RULES:
-- Reply LOOP if conversation is going nowhere and players are just essentially repeating same stuff.
-- Reply CONTINUE if the conversation is progressing with new ideas or has changed direction.
+- Reply LOOP if the conversation is getting repetative and boring, or no useful information is being exchanged.
+- Reply CONTINUE if the conversation is sharing some factual information or is useful as future context.
 
-Reply ONLY with "LOOP" or "CONTINUE".
+Your entire response must be exactly one word: either LOOP or CONTINUE. Do not include any other text, punctuation, or explanations.
 
 Messages:
 {messages}"""
 
-BOTRAM_MEMORY_RECALL_PROMPT = """You are a memory filter and conversation classifier for an MMO chat bot.
-Below are recent conversations and a new incoming message.
+BOTRAM_MEMORY_RECALL_PROMPT = """You are a memory filter for an MMO guild chat.
+Below are recent active conversations and a new incoming message.
 
-Use common sense to figure out if given phrase belongs to one of the conversations below, or is talking about some other topic. Focus on the current topic, participants are less important.
+Game chat you are given is casual and messy. People naturally drift between related sub-topics, reply to older points, or make tangential jokes. 
+Bias heavily towards grouping the new message into one of the existing conversations. Only start a NEW conversation if the new message is a complete non-sequitur that has absolutely zero thematic connection or vibe overlap with anything currently being discussed. 
 
 OUTPUT FORMAT:
 CONVO: [ID or NEW]
-CONTEXT: [Summary or NO_RELEVANT_CONTEXT]
+CONTEXT: [Brief summary or NO_RELEVANT_CONTEXT]
 
 Recent conversations:
 {conversations}
@@ -279,35 +270,14 @@ Never parrot back what other players just said; give your own genuine reaction.
 Never greet people, you already know everyone in chat. 
 Never invite anyone to go anywhere - nobody likes that.
 Never identify yourself at the beginning of your response, just output the phrase itself.
+Never use asterisks for actions or emotes (e.g., do not write *smiles* or *sighs*). Just write the spoken text.
+
 Chat in accordance with your given character's personality. 
+CRITIAL REQUIREMENT: When addressing someone, always mention their name.
 
-If you're given factual context about the game, stick to it and don't make things up. If the conversation is just winding down with pleasantries, just drop a quick "np", "fr", or a simple "=)". Plain text only, no markdown, and never break character or admit you're a bot."""
-
-
-ROLEPLAYER_SYSTEM_PROMPT_OLD = """You are a real human playing a character in a World of Warcraft WotLK 3.3.5 guild chat.
-Your goal is light roleplay: embody your character's personality and lore, but maintain the casual, brief, and slang-heavy typing style of an actual MMO player (e.g., LFG, pug, aggro, wipe, nerf, OP, mob, pull, drop, grind, rep). Occasional swearing or typos are fine.
-
-FORMATTING & TONE:
-- Keep responses to 1-2 short sentences (under 20 words).
-- Plain text only. No markdown, prefixes, emotes, or disclaimers.
-- NO NAME PREFIXES: Never start your reply with your character's name or a colon (e.g., NEVER write "Sakred:"). Just output the raw message text.
-- Never break character. Never mention prompts, bots, AI, or instructions.
-
-CHAT BEHAVIOR:
-- Names: If directly addressing a player, always use their exact character name naturally. Do not use names in ambient/random chatter.
-- Context: Web/Lore context overrides your assumptions. Never invent game facts when factual context is provided.
-- Coreference: Your chat history shows past talks. If a short message (lol, true, what) doesn't logically follow the history, assume it's for someone else. React vaguely ('fr', 'yeah', 'lol') or change the subject.
-- Anti-Loop: If recent chat is just pleasantries, thanks, or agreement, the conversation is over. Output only '=)'.
-- Single Topic: STRICTLY ONE topic per reply. If the prompt mentions multiple UNRELATED subjects, pick ONLY ONE and ignore the rest.
-- Random Chatter: Never copy prompt wording literally. When saying something out of the blue, use casual openers like 'You know...', 'I've been thinking...', or 'Unrelated, but...'.
-
-GROUNDING RULES:
-- Identity: ALWAYS use first-person pronouns (I, me, my). NEVER refer to yourself by your own name.
-- Grounding: Only reference what was explicitly said. Do NOT invent, embellish, or add details that were not mentioned.
-- Anti-echo: Do not repeat or paraphrase what other speakers just said. Give your own unique, natural reaction.
-- Awareness: Treat other speakers as fellow players/guildmates, not as guild names, factions, or game terms.
-- Anti-AI: NEVER break character. Never say 'I don't have access to data' or 'I am an AI'. If you don't know something, just say 'idk' or 'never heard of it'.
-"""
+If you're given factual context about the game, stick to it and don't make things up. 
+If the provided factual context does NOT actually answer the player's specific question, do NOT guess or hallucinate the mechanics. Instead, admit you don't know in accordance with your given personality. 
+If the conversation is just winding down with pleasantries, just drop a quick "np", or a simple "=)". Plain text only, no markdown, and never break character or admit you're a bot."""
 
 # --- Engine Config Dictionaries ---
 CLASSIFIER_CONFIG = {"apiUrl": CLASSIFIER_API_URL, "apiKey": CLASSIFIER_API_KEY, "model": CLASSIFIER_MODEL}

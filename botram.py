@@ -10,11 +10,12 @@ from config import (
     BOTRAM_MEMORY_WINDOW_MINUTES, BOTRAM_TRANSCRIPT_WINDOW, ROLEPLAYER_SYSTEM_PROMPT,
     BOTRAM_LOOP_PROMPT, BOTRAM_MEMORY_RECALL_PROMPT, DEBUG_FULL_LOGS,
     BOTRAM_GOSSIP_ENABLED, BOTRAM_GOSSIP_WINDOW_HOURS, BOTRAM_GOSSIP_MAX_CONVOS,
+    TRUSTED_PLAYERS, BOTRAM_TRUSTED_IDLE_LIMIT,
     BOTRAM_GOSSIP_MAX_PHRASES, BOTRAM_GOSSIP_MIN_SCORE, BOTRAM_GOSSIP_MAX_KEYWORDS,
 )
 
 from logging_utils import log, logPayload
-from engine import callOllama
+from engine import callLLM
 from french_maid import cleanWowLinks, expandSlang, should_break_on_message
 
 class BotRAM:
@@ -320,7 +321,17 @@ class BotRAM:
             msgMatch = re.search(r"Event:\s*(.*?)(?=\.\s+React|\.\s+Avoid|\.\s+You are playing|$)", cleanPrompt, re.DOTALL)
             if msgMatch: isEvent = True
 
-        if msgMatch: playerMsg = cleanWowLinks(msgMatch.group(1).strip())
+        if msgMatch: 
+            playerMsg = cleanWowLinks(msgMatch.group(1).strip())
+
+        # Handle Bot-Initiated (Ambient) messages
+        ambientInstruction = ""
+        if not playerMsg and targetName == "-ambient-":
+            # Keep the persona and instruction, strip the stats blocks to avoid redundancy
+            ambientInstr = re.sub(r"Your Info:.*", "", cleanPrompt, flags=re.DOTALL | re.IGNORECASE)
+            ambientInstr = re.sub(r"Player Info:.*", "", ambientInstr, flags=re.DOTALL | re.IGNORECASE)
+            ambientInstruction = ambientInstr.strip()
+            # IMPORTANT: Do NOT assign to playerMsg, otherwise the raw prompt gets saved to the DB!
 
         # Check for break strings BEFORE any processing
         if playerMsg and should_break_on_message(playerMsg):
@@ -353,7 +364,7 @@ class BotRAM:
                     # Expand slang so the Memory Parser doesn't hallucinate fake names for abbreviations
                     expandedPlayerMsg = expandSlang(playerMsg)
                     recallPrompt = BOTRAM_MEMORY_RECALL_PROMPT.replace("{conversations}", historyText).replace("{new_message}", expandedPlayerMsg)
-                    recallResp = callOllama(BOTRAM_MODEL, "", recallPrompt, {"temperature": 0.1, "num_predict": 150}).strip()
+                    recallResp = callLLM(BOTRAM_MODEL, "", recallPrompt, {"temperature": 0.1, "num_predict": 150}).strip()
                     logPayload("BOTRAM_MEMORY_RAW", recallResp)
 
                     targetConvoId = None
@@ -407,7 +418,7 @@ class BotRAM:
                 speakerName = "[EVENT]" if isEvent else (targetName if targetName != "-ambient-" else botName)
                 isBotEcho = self.conn.execute("""
                     SELECT 1 FROM phrases
-                    WHERE speaker = ? AND text = ? AND timestamp > datetime('now', '-15 seconds')
+                    WHERE speaker = ? AND text = ? AND timestamp > datetime('now', '-60 seconds')
                     LIMIT 1
                 """, (speakerName, playerMsg)).fetchone()
 
@@ -418,6 +429,27 @@ class BotRAM:
                         self.conn.execute("UPDATE conversations SET last_valid_timestamp=CURRENT_TIMESTAMP WHERE id=?", (convoId,))
                 else:
                     log("BOTRAM", f"Skipped duplicate event/echo from {speakerName}.")
+            
+            # --- TRUSTED PLAYER IDLE LIMIT ---
+            if not isShortCircuit and convoId and BOTRAM_TRUSTED_IDLE_LIMIT > 0 and TRUSTED_PLAYERS:
+                trustedPlayers = [str(p).lower() for p in TRUSTED_PLAYERS]
+                placeholders = ",".join(["?"] * len(trustedPlayers))
+
+                messagesSinceTrusted = self.conn.execute(f"""
+                    SELECT COUNT(*) FROM phrases
+                    WHERE convo_id = ?
+                      AND id > COALESCE(
+                          (SELECT MAX(id) FROM phrases
+                           WHERE convo_id = ?
+                             AND LOWER(speaker) IN ({placeholders})),
+                          0
+                      )
+                """, (convoId, convoId, *trustedPlayers)).fetchone()[0]
+
+                if messagesSinceTrusted > BOTRAM_TRUSTED_IDLE_LIMIT:
+                    self.conn.execute("UPDATE conversations SET status='over' WHERE id=?", (convoId,))
+                    isShortCircuit = True
+                    log("BOTRAM", f"TRUSTED IDLE LIMIT: No trusted player in convo {convoId} for {messagesSinceTrusted} msgs. Marking OVER.")
 
             if not isShortCircuit and convoId:
                 count = self.conn.execute("SELECT COUNT(*) FROM phrases WHERE convo_id=?", (convoId,)).fetchone()[0]
@@ -426,7 +458,7 @@ class BotRAM:
                     lastMsgs = self.conn.execute("SELECT speaker, text FROM phrases WHERE convo_id=? ORDER BY timestamp DESC LIMIT 8", (convoId,)).fetchall()
                     msgText = "\n".join([f"{m[0]}: {m[1]}" for m in reversed(lastMsgs)])
                     loopPrompt = BOTRAM_LOOP_PROMPT.replace("{messages}", msgText)
-                    loopResp = callOllama(BOTRAM_MODEL, "", loopPrompt, {"temperature": 0.1, "num_predict": 20}).strip().upper()
+                    loopResp = callLLM(BOTRAM_MODEL, "", loopPrompt, {"temperature": 0.1, "num_predict": 20}).strip().upper()
                     if loopResp.startswith("LOOP"):
                         self.conn.execute("UPDATE conversations SET status='over' WHERE id=?", (convoId,))
                         isShortCircuit = True
@@ -497,7 +529,9 @@ class BotRAM:
         # --- BUILD CLEAN ROLEPLAYER PROMPT ---
         recentHistory = self.getConvoContext(convoId, limit=10)
         
-        if isEvent:
+        if targetName == "-ambient-":
+            newMsg = f"[System Instruction for Ambient Chat]:\n{ambientInstruction}"
+        elif isEvent:
             newMsg = f"[System Event]: {playerMsg}"
         else:
             newMsg = f"{targetName.capitalize()} says: {playerMsg}"

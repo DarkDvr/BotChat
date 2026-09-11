@@ -496,6 +496,11 @@ def _normalizeFactText(text):
 def runClassifier(payload, botRamInstance):
     if payload.get("targetName") == "-ambient-":
         return
+        
+    # Skip classification if the message is from the bot itself
+    if payload.get("targetName") == payload.get("botName"):
+        log("CLASSIFIER", "Skipping classification for bot's own message.")
+        return
 
     playerMsg = payload.get("playerMsg", "")
     targetName = payload.get("targetName", "")
