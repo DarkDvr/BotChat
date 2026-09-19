@@ -133,10 +133,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             log("ERROR", "FATAL: Unexpected error. Dumped to error.log. Terminating process.")
             os._exit(1)
 
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"response": response}).encode("utf-8"))
+# Catch socket disconnects (Timeouts from the C++ module) gracefully
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"response": response}).encode("utf-8"))
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            log("MAIN", "DROPPED AT SOCKET: WoW server closed the connection before receiving the reply (C++ timeout).")
+        except Exception as e:
+            log("ERROR", f"Failed to send response back to WoW server: {e}")
 
     def log_message(self, fmt, *args):
         pass

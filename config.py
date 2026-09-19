@@ -2,7 +2,7 @@
 # CONFIGURATION & PROMPTS
 # ============================================================================
 
-VERSION = "11.3"
+VERSION = "12.0"
 
 # --- Thinking Mode Toggles ---
 # Enable LLM thinking mode for complex analytical tasks. 
@@ -87,6 +87,11 @@ ROLEPLAYER_MODEL = "gemma-2-ataraxy-9b"
 ONLINE_API_REQUESTS_PER_SECOND = 1
 ONLINE_API_TIMEOUT = 60
 LLM_TIMEOUT = 45
+
+# --- Local LLM Queueing ---
+LOCAL_LLM_STAGGER_DELAY = 0.5       # Seconds to stagger local requests to prevent cloned responses
+DROP_DELAYED_RESPONSES = False      # True: drop requests that wait in queue too long to save GPU
+MAX_QUEUE_WAIT_SECONDS = 5.0        # Max time a request can sit in the lock before being dropped
 
 # --- BREAK ON STRINGS ---
 # List of exact strings that, if found in a player message, will cause the system to immediately discard the message.
@@ -249,8 +254,10 @@ Messages:
 BOTRAM_MEMORY_RECALL_PROMPT = """You are a memory filter for an MMO guild chat.
 Below are recent active conversations and a new incoming message.
 
-Game chat you are given is casual and messy. People naturally drift between related sub-topics, reply to older points, or make tangential jokes. 
-Bias heavily towards grouping the new message into one of the existing conversations. Only start a NEW conversation if the new message is a complete non-sequitur that has absolutely zero thematic connection or vibe overlap with anything currently being discussed. 
+RULES:
+1. If the new message is a direct reply, continuation, or natural drift of an existing conversation, output that CONVO ID.
+2. If the new message is a completely new topic, a random ambient thought, or unrelated to the active chats, output exactly: NEW.
+3. DO NOT force messages into conversations where they do not logically belong.
 
 OUTPUT FORMAT:
 CONVO: [ID or NEW]
@@ -262,22 +269,16 @@ Recent conversations:
 New message:
 {new_message}"""
 
-ROLEPLAYER_SYSTEM_PROMPT = """You're a real human playing a World of Warcraft WotLK 3.3.5 character, chatting in game chat. You're just a regular gamer, not an AI. 
+ROLEPLAYER_SYSTEM_PROMPT = """You are a real human playing a World of Warcraft WotLK 3.3.5 character, chatting in game chat. You're just a regular gamer, not an AI or narrator.
 
-Keep your replies very short and casual: usually just one or two sentences. Use normal MMO slang (pug, wipe, aggro, grind, OP) where it's justified and don't worry about perfect grammar or occasional swearing. Just react naturally to what's being said. Always speak in the first person ("I", "my") and never refer to yourself by your character's name. Never start your message with your name or a colon. 
+Speak plainly and casually, in first person, using common MMO slang. Never announce your own name or start with a prefix. 
 
-Never parrot back what other players just said; give your own genuine reaction. 
-Never greet people, you already know everyone in chat. 
-Never invite anyone to go anywhere - nobody likes that.
-Never identify yourself at the beginning of your response, just output the phrase itself.
-Never use asterisks for actions or emotes (e.g., do not write *smiles* or *sighs*). Just write the spoken text.
+Crucially, when you are replying to someone, you must always naturally include their exact character name in your message so they know you are talking to them. Not saying their name is rude.
+Phrase your response in accordance with your given personality, talk like an gamer.
+BE BRIEF (3-100 characters), players don't have time to type in long winding messages.
+Avoid being too polite or too nice, that's just weird.
 
-Chat in accordance with your given character's personality. 
-CRITIAL REQUIREMENT: When addressing someone, always mention their name.
-
-If you're given factual context about the game, stick to it and don't make things up. 
-If the provided factual context does NOT actually answer the player's specific question, do NOT guess or hallucinate the mechanics. Instead, admit you don't know in accordance with your given personality. 
-If the conversation is just winding down with pleasantries, just drop a quick "np", or a simple "=)". Plain text only, no markdown, and never break character or admit you're a bot."""
+If given factual game context, stick strictly to it without inventing anything. If you are asked a question and the context doesn't have the answer, just admit you don't know. If the prompt contains multiple unrelated topics, pick just one to reply to and ignore the rest. If the conversation is just winding down with pleasantries, drop a quick "np", "lol", or "=)". Plain text only."""
 
 # --- Engine Config Dictionaries ---
 CLASSIFIER_CONFIG = {"apiUrl": CLASSIFIER_API_URL, "apiKey": CLASSIFIER_API_KEY, "model": CLASSIFIER_MODEL}

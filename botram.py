@@ -22,6 +22,7 @@ class BotRAM:
     def __init__(self):
         self.conn = sqlite3.connect(BOTRAM_DB_PATH, check_same_thread=False)
         self.lock = threading.Lock()
+        self.pending_ambients = {} # RAM-only holding for un-replied ambient thoughts
         self._initDb()
 
     def _initDb(self):
@@ -288,9 +289,21 @@ class BotRAM:
                 historyText += f"\n[Conversation ID {cid} - Ambient]:\n"
                 historyText += "\n".join([f"{r[0]}: {r[1]}" for r in reversed(rows)]) + "\n"
 
+        # --- INJECT PENDING RAM AMBIENTS ---
+        now = datetime.utcnow()
+        to_delete = []
+        for pid, data in self.pending_ambients.items():
+            if (now - data['timestamp']).total_seconds() > 300: # 5 min expiry
+                to_delete.append(pid)
+            else:
+                historyText += f"\n[Conversation ID {pid} - Pending]:\n{data['speaker']}: {data['text']}\n"
+        
+        for pid in to_delete:
+            del self.pending_ambients[pid]
+
         if historyText:
             if DEBUG_FULL_LOGS: logPayload("BOTRAM_CONTEXT", historyText)
-            log("BOTRAM", f"Gathered {len(seenIds)} conversations for memory parsing.")
+            log("BOTRAM", f"Gathered {len(seenIds)} DB convos and {len(self.pending_ambients)} pending thoughts.")
         return historyText.strip()
 
     def processIncoming(self, payload):
@@ -312,10 +325,8 @@ class BotRAM:
 
         msgMatch = re.search(r"NEW MESSAGE from \w+:\s*(.*?)\s*\w+ says:", cleanPrompt, re.DOTALL)
         if not msgMatch: 
-            # Match up to the closing quote followed by a period and the next prompt section
             msgMatch = re.search(r"\w+ says:\s*'(.*?)'\.\s*(?:Your Info:|Player Info:|NEW MESSAGE|Event:)", cleanPrompt, re.DOTALL)
         if not msgMatch: 
-            # Fallback for ambient/weird formats: match up to quote + period
             msgMatch = re.search(r"\w+ says:\s*'(.*?)'\.", cleanPrompt, re.DOTALL)
         if not msgMatch:
             msgMatch = re.search(r"Event:\s*(.*?)(?=\.\s+React|\.\s+Avoid|\.\s+You are playing|$)", cleanPrompt, re.DOTALL)
@@ -327,11 +338,9 @@ class BotRAM:
         # Handle Bot-Initiated (Ambient) messages
         ambientInstruction = ""
         if not playerMsg and targetName == "-ambient-":
-            # Keep the persona and instruction, strip the stats blocks to avoid redundancy
             ambientInstr = re.sub(r"Your Info:.*", "", cleanPrompt, flags=re.DOTALL | re.IGNORECASE)
             ambientInstr = re.sub(r"Player Info:.*", "", ambientInstr, flags=re.DOTALL | re.IGNORECASE)
             ambientInstruction = ambientInstr.strip()
-            # IMPORTANT: Do NOT assign to playerMsg, otherwise the raw prompt gets saved to the DB!
 
         # Check for break strings BEFORE any processing
         if playerMsg and should_break_on_message(playerMsg):
@@ -348,20 +357,9 @@ class BotRAM:
             isShortCircuit = False
             memoryContext = ""
 
-            if targetName == "-ambient-":
-                row = self.conn.execute("""SELECT id FROM conversations
-                    WHERE participants LIKE ? AND status = 'active'
-                    AND last_valid_timestamp > datetime('now', ?)
-                    ORDER BY last_valid_timestamp DESC LIMIT 1""",
-                    (f'%{botName}%', f'-{BOTRAM_AMBIENT_JOIN_MINUTES} minutes')).fetchone()
-                if row:
-                    convoId = row[0]
-                    log("BOTRAM", f"Ambient chatter joining active convo {convoId}.")
-
-            elif playerMsg:
+            if playerMsg:
                 historyText = self.gatherMemoryContext(botName, targetName)
                 if historyText:
-                    # Expand slang so the Memory Parser doesn't hallucinate fake names for abbreviations
                     expandedPlayerMsg = expandSlang(playerMsg)
                     recallPrompt = BOTRAM_MEMORY_RECALL_PROMPT.replace("{conversations}", historyText).replace("{new_message}", expandedPlayerMsg)
                     recallResp = callLLM(BOTRAM_MODEL, "", recallPrompt, {"temperature": 0.1, "num_predict": 150}).strip()
@@ -369,50 +367,79 @@ class BotRAM:
 
                     targetConvoId = None
                     context = ""
+                    isPendingMatch = False
+                    
                     for line in recallResp.split('\n'):
                         if line.upper().startswith("CONVO:"):
                             convoVal = line.split(':', 1)[1].strip().upper()
                             if convoVal != "NEW":
-                                digits = re.sub(r'\D', '', convoVal)
-                                if digits: targetConvoId = int(digits)
+                                if "AMB-" in convoVal:
+                                    match = re.search(r'(AMB-\d+)', convoVal)
+                                    if match:
+                                        targetConvoId = match.group(1)
+                                        isPendingMatch = True
+                                else:
+                                    digits = re.sub(r'\D', '', convoVal)
+                                    if digits: targetConvoId = int(digits)
                         elif line.upper().startswith("CONTEXT:"):
                             context = line.split(':', 1)[1].strip()
 
                     if targetConvoId is not None:
-                        row = self.conn.execute("SELECT id, status, last_valid_timestamp, participants FROM conversations WHERE id=?", (targetConvoId,)).fetchone()
-                        if row:
-                            cid, dbStatus, lastValidStr, participants = row
-                            lastValid = datetime.strptime(lastValidStr, "%Y-%m-%d %H:%M:%S")
-                            timeDiff = (now - lastValid).total_seconds() / 60.0
+                        if isPendingMatch and targetConvoId in self.pending_ambients:
+                            # Upgrade RAM-only ambient to a real DB Conversation
+                            pData = self.pending_ambients[targetConvoId]
+                            parts = f"{pData['speaker']},{botName}"
+                            if targetName != "-ambient-": parts += f",{targetName}"
+                            parts = ",".join(list(set(parts.split(',')))) # deduplicate
+                            
+                            cur = self.conn.execute("INSERT INTO conversations (status, participants) VALUES ('active', ?)", (parts,))
+                            real_cid = cur.lastrowid
+                            self.conn.execute("INSERT INTO phrases (convo_id, speaker, text, timestamp) VALUES (?, ?, ?, ?)",
+                                              (real_cid, pData['speaker'], pData['text'], pData['timestamp']))
+                            convoId = real_cid
+                            del self.pending_ambients[targetConvoId]
+                            log("BOTRAM", f"Memory Parser matched pending {targetConvoId}. Upgraded to real convo {real_cid}.")
+                        
+                        elif not isPendingMatch:
+                            row = self.conn.execute("SELECT id, status, last_valid_timestamp, participants FROM conversations WHERE id=?", (targetConvoId,)).fetchone()
+                            if row:
+                                cid, dbStatus, lastValidStr, participants = row
+                                lastValid = datetime.strptime(lastValidStr, "%Y-%m-%d %H:%M:%S")
+                                timeDiff = (now - lastValid).total_seconds() / 60.0
 
-                            if dbStatus == 'over':
-                                if timeDiff < BOTRAM_LOOP_COOLDOWN_MINUTES:
-                                    isShortCircuit = True
-                                    convoId = cid
-                                    log("BOTRAM", f"Memory Parser matched convo {cid}, but it's OVER (cooldown). Short-circuiting.")
+                                if dbStatus == 'over':
+                                    if timeDiff < BOTRAM_LOOP_COOLDOWN_MINUTES:
+                                        isShortCircuit = True
+                                        convoId = cid
+                                        log("BOTRAM", f"Memory Parser matched convo {cid}, but it's OVER (cooldown). Short-circuiting.")
+                                    else:
+                                        self.conn.execute("UPDATE conversations SET status='active' WHERE id=?", (cid,))
+                                        convoId = cid
+                                        log("BOTRAM", f"Resurrecting expired cooldown convo {cid}.")
                                 else:
-                                    self.conn.execute("UPDATE conversations SET status='active' WHERE id=?", (cid,))
                                     convoId = cid
-                                    log("BOTRAM", f"Resurrecting expired cooldown convo {cid}.")
+                                    log("BOTRAM", f"Memory Parser matched convo {cid}. Joining.")
+                                    newParts = set(participants.split(','))
+                                    newParts.add(botName)
+                                    if targetName != "-ambient-": newParts.add(targetName)
+                                    self.conn.execute("UPDATE conversations SET participants=? WHERE id=?", (','.join(newParts), cid))
                             else:
-                                convoId = cid
-                                log("BOTRAM", f"Memory Parser matched convo {cid}. Joining.")
-                                newParts = set(participants.split(','))
-                                newParts.add(botName)
-                                if targetName != "-ambient-": newParts.add(targetName)
-                                self.conn.execute("UPDATE conversations SET participants=? WHERE id=?", (','.join(newParts), cid))
-                        else:
-                            log("BOTRAM", f"Memory Parser returned convo {targetConvoId}, but it doesn't exist. Starting fresh.")
+                                log("BOTRAM", f"Memory Parser returned convo {targetConvoId}, but it doesn't exist. Starting fresh.")
 
                     if not isShortCircuit and context and "NO_RELEVANT_CONTEXT" not in context.upper():
                         memoryContext = f"\n\n[BOTRAM MEMORY CONTEXT]:\n{context}\nUse this memory naturally. Do not reference it unless relevant."
                         log("BOTRAM", f"Memory Parser injected context for {botName}.")
 
             if not convoId and not isShortCircuit:
-                parts = f"{botName},{targetName}" if targetName != "-ambient-" else botName
-                cur = self.conn.execute("INSERT INTO conversations (status, participants) VALUES ('active', ?)", (parts,))
-                convoId = cur.lastrowid
-                log("BOTRAM", f"Started new conversation {convoId} ({botName} -> {targetName})")
+                if targetName == "-ambient-":
+                    # Assign a pseudo ID, do NOT write to DB yet
+                    convoId = f"AMB-{int(datetime.utcnow().timestamp() * 1000)}"
+                    log("BOTRAM", f"Started pending ambient thought {convoId} ({botName})")
+                else:
+                    parts = f"{botName},{targetName}"
+                    cur = self.conn.execute("INSERT INTO conversations (status, participants) VALUES ('active', ?)", (parts,))
+                    convoId = cur.lastrowid
+                    log("BOTRAM", f"Started new conversation {convoId} ({botName} -> {targetName})")
 
             if playerMsg:
                 speakerName = "[EVENT]" if isEvent else (targetName if targetName != "-ambient-" else botName)
@@ -423,15 +450,19 @@ class BotRAM:
                 """, (speakerName, playerMsg)).fetchone()
 
                 if not isBotEcho:
-                    self.conn.execute("INSERT INTO phrases (convo_id, speaker, text) VALUES (?, ?, ?)",
-                                      (convoId, speakerName, playerMsg))
-                    if not isShortCircuit:
-                        self.conn.execute("UPDATE conversations SET last_valid_timestamp=CURRENT_TIMESTAMP WHERE id=?", (convoId,))
+                    # Do not insert playerMsg into DB if this is a pending RAM convo
+                    if not (isinstance(convoId, str) and convoId.startswith("AMB-")):
+                        self.conn.execute("INSERT INTO phrases (convo_id, speaker, text) VALUES (?, ?, ?)",
+                                          (convoId, speakerName, playerMsg))
+                        if not isShortCircuit:
+                            self.conn.execute("UPDATE conversations SET last_valid_timestamp=CURRENT_TIMESTAMP WHERE id=?", (convoId,))
                 else:
                     log("BOTRAM", f"Skipped duplicate event/echo from {speakerName}.")
             
             # --- TRUSTED PLAYER IDLE LIMIT ---
-            if not isShortCircuit and convoId and BOTRAM_TRUSTED_IDLE_LIMIT > 0 and TRUSTED_PLAYERS:
+            isRealConvo = convoId and not (isinstance(convoId, str) and convoId.startswith("AMB-"))
+            
+            if not isShortCircuit and isRealConvo and BOTRAM_TRUSTED_IDLE_LIMIT > 0 and TRUSTED_PLAYERS:
                 trustedPlayers = [str(p).lower() for p in TRUSTED_PLAYERS]
                 placeholders = ",".join(["?"] * len(trustedPlayers))
 
@@ -451,7 +482,7 @@ class BotRAM:
                     isShortCircuit = True
                     log("BOTRAM", f"TRUSTED IDLE LIMIT: No trusted player in convo {convoId} for {messagesSinceTrusted} msgs. Marking OVER.")
 
-            if not isShortCircuit and convoId:
+            if not isShortCircuit and isRealConvo:
                 count = self.conn.execute("SELECT COUNT(*) FROM phrases WHERE convo_id=?", (convoId,)).fetchone()[0]
                 if count > BOTRAM_LOOP_CHECK_THRESHOLD and count % BOTRAM_LOOP_CHECK_INTERVAL == 0:
                     log("BOTRAM", f"Running loop detection for convo {convoId}...")
@@ -469,8 +500,6 @@ class BotRAM:
         payload["convoId"] = convoId
         payload["isShortCircuit"] = isShortCircuit
         payload["memoryContext"] = memoryContext
-        # We intentionally drop payload["rawSystem"] (the C++ module's generic prompt) 
-        # to avoid conflicting instructions. We rely entirely on ROLEPLAYER_SYSTEM_PROMPT.
         baseSystem = memoryContext if memoryContext else ""
         
         # --- META ROLEPLAYER PROMPT ---
@@ -479,15 +508,12 @@ class BotRAM:
             payload["finalSystem"] += "\n\n" + baseSystem
 
         # --- EXTRACT BOT IDENTITY & PERSONALITY ---
-        # The bot's level/class are in the opening identity line:
         identityMatch = re.search(r"^You are ([^.]+)\.", cleanPrompt, re.IGNORECASE)
         botIdentity = identityMatch.group(1).strip() if identityMatch else botName.capitalize()
 
-        # Extract the persona/lore text between the identity line and the stats blocks
         personaMatch = re.search(r"^You are [^.]+\.\s*(.*?)(?=\s*Your Info:|\s*Player Info:|\s*NEW MESSAGE|\s*\w+ says:)", cleanPrompt, re.DOTALL | re.IGNORECASE)
         botPersona = personaMatch.group(1).strip() if personaMatch else ""
 
-        # Bot stats are after "Your Info:" but must stop before "Player Info:"
         infoMatch = re.search(
             r"Your Info:\s*(.*?)(?=\.\s*Player Info:|\s+Player Info:|$)",
             cleanPrompt,
@@ -495,39 +521,33 @@ class BotRAM:
         )
         botStats = infoMatch.group(1).strip() if infoMatch else ""
 
-        # Defensive cleanup: never pass player stats into the bot's identity block
         botStats = re.sub(r"\bPlayer Info:.*", "", botStats, flags=re.DOTALL | re.IGNORECASE)
-        # Remove overly narrow location/map fields from the stats block
         botStats = re.sub(r"\bLocation:\s*[^,.]*(?:,|\.)?", "", botStats, flags=re.IGNORECASE)
         botStats = re.sub(r"\bMap:\s*[^,.]*(?:,|\.)?", "", botStats, flags=re.IGNORECASE)
-        # Remove Zone from the raw string so we can append it cleanly at the end
         botStats = re.sub(r"\bZone:\s*[^,.]*(?:,|\.)?", "", botStats, flags=re.IGNORECASE)
         
-        # Normalize whitespace/punctuation after removals
         botStats = re.sub(r"\s+", " ", botStats)
         botStats = re.sub(r"\s+,", ",", botStats)
         botStats = re.sub(r",\s*,", ",", botStats)
         botStats = botStats.strip(" ,.")
 
-        # Append the broad zone (extracted earlier by extractIdentity)
         if zone and zone != "Unknown":
             botStats = f"{botStats}, Zone: {zone}" if botStats else f"Zone: {zone}"
 
-        # Prepend the identity line (which contains the level!) to the stats
         fullStats = f"{botIdentity}. {botStats}" if botIdentity else botStats
         log("BOTRAM", f"EXTRACTED STATS: {fullStats!r}")
         
-        # Inject Persona into System Prompt
         if botPersona:
             payload["finalSystem"] = (payload["finalSystem"] or "") + f"\n\n[YOUR CHARACTER PERSONALITY & LORE]:\n{botPersona}"
             log("BOTRAM", "Injected bot persona/lore into system prompt.")
 
-        # Inject Stats into System Prompt
         if fullStats:
             payload["finalSystem"] = (payload["finalSystem"] or "") + f"\n\n[YOUR CHARACTER STATS]: {fullStats}\nCRITICAL: If asked about your level, class, or spec, use ONLY these exact stats. Do not hallucinate numbers."
 
         # --- BUILD CLEAN ROLEPLAYER PROMPT ---
-        recentHistory = self.getConvoContext(convoId, limit=10)
+        recentHistory = ""
+        if isinstance(convoId, int):
+            recentHistory = self.getConvoContext(convoId, limit=10)
         
         if targetName == "-ambient-":
             newMsg = f"[System Instruction for Ambient Chat]:\n{ambientInstruction}"
@@ -619,16 +639,25 @@ class BotRAM:
             return
 
         with self.lock:
-            row = self.conn.execute("SELECT status FROM conversations WHERE id=?", (convoId,)).fetchone()
-            if row and row[0] == 'over':
-                self.conn.execute("INSERT INTO phrases (convo_id, speaker, text) VALUES (?, ?, ?)", (convoId, botName, cleanReply))
-                if targetName == "-ambient-": log("BOTRAM", f"{botName} posted an ignored ambient thought: \"{cleanReply}\"")
-                else: log("BOTRAM", f"{botName} said to {targetName} (ignored, convo over): \"{cleanReply}\"")
+            if isinstance(convoId, str) and convoId.startswith("AMB-"):
+                self.pending_ambients[convoId] = {
+                    "speaker": botName,
+                    "text": cleanReply,
+                    "timestamp": datetime.utcnow()
+                }
+                if DEBUG_FULL_LOGS: log("BOTRAM", f"Held ambient thought in RAM: {convoId}")
+                if targetName == "-ambient-": log("BOTRAM", f"{botName} posted a pending ambient thought: \"{cleanReply}\"")
             else:
-                self.conn.execute("INSERT INTO phrases (convo_id, speaker, text) VALUES (?, ?, ?)", (convoId, botName, cleanReply))
-                self.conn.execute("UPDATE conversations SET last_valid_timestamp=CURRENT_TIMESTAMP WHERE id=?", (convoId,))
-                if targetName == "-ambient-": log("BOTRAM", f"{botName} posted an ambient thought: \"{cleanReply}\"")
-                else: log("BOTRAM", f"{botName} said to {targetName}: \"{cleanReply}\"")
+                row = self.conn.execute("SELECT status FROM conversations WHERE id=?", (convoId,)).fetchone()
+                if row and row[0] == 'over':
+                    self.conn.execute("INSERT INTO phrases (convo_id, speaker, text) VALUES (?, ?, ?)", (convoId, botName, cleanReply))
+                    if targetName == "-ambient-": log("BOTRAM", f"{botName} posted an ignored ambient thought: \"{cleanReply}\"")
+                    else: log("BOTRAM", f"{botName} said to {targetName} (ignored, convo over): \"{cleanReply}\"")
+                else:
+                    self.conn.execute("INSERT INTO phrases (convo_id, speaker, text) VALUES (?, ?, ?)", (convoId, botName, cleanReply))
+                    self.conn.execute("UPDATE conversations SET last_valid_timestamp=CURRENT_TIMESTAMP WHERE id=?", (convoId,))
+                    if targetName == "-ambient-": log("BOTRAM", f"{botName} posted an ambient thought: \"{cleanReply}\"")
+                    else: log("BOTRAM", f"{botName} said to {targetName}: \"{cleanReply}\"")
             self.conn.commit()
 
 botRamInstance = BotRAM()

@@ -4,7 +4,8 @@ import requests
 import re
 from config import (
     LLM_URL, LLM_TIMEOUT, ONLINE_API_TIMEOUT, 
-    ONLINE_API_REQUESTS_PER_SECOND, CACHE_TTL
+    ONLINE_API_REQUESTS_PER_SECOND, CACHE_TTL,
+    LOCAL_LLM_STAGGER_DELAY, DROP_DELAYED_RESPONSES, MAX_QUEUE_WAIT_SECONDS
 )
 from logging_utils import log
 
@@ -30,6 +31,7 @@ _cache = {}
 _cacheLock = threading.Lock()
 _queryLocks = {}
 _queryLocksLock = threading.Lock()
+_local_llm_lock = threading.Lock()
 
 def cacheGet(key):
     with _cacheLock:
@@ -88,7 +90,6 @@ def stripThinkTags(text):
 def callLLM(model, systemPrompt, userPrompt, options):
     thinkMode = options.get("think", False)
     
-    # Bionic / LM Studio uses the OpenAI-compatible chat completions format
     messages = []
     if systemPrompt:
         messages.append({"role": "system", "content": systemPrompt})
@@ -102,32 +103,43 @@ def callLLM(model, systemPrompt, userPrompt, options):
         "max_tokens": options.get("num_predict", 256),
     }
     
-    # Ensure we hit the exact chat completions endpoint
     url = LLM_URL.rstrip("/")
     if not url.endswith("/chat/completions"):
         url += "/chat/completions"
 
-    try:
-        # Bionic JIT loading might take a few extra seconds on the very first request
-        resp = requests.post(url, json=payload, timeout=max(LLM_TIMEOUT, 120))
-        resp.raise_for_status()
+    enqueue_time = time.time()
+
+    # Enforce sequential local requests
+    with _local_llm_lock:
+        wait_time = time.time() - enqueue_time
         
-        # Parse OpenAI response format
-        response_data = resp.json()
-        response = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        # Explicit drop check before we waste GPU cycles
+        if DROP_DELAYED_RESPONSES and wait_time > MAX_QUEUE_WAIT_SECONDS:
+            log("ENGINE", f"DROPPED: Request waited {wait_time:.1f}s in queue (DROP_DELAYED_RESPONSES=True).")
+            return ""
+
+        if LOCAL_LLM_STAGGER_DELAY > 0:
+            time.sleep(LOCAL_LLM_STAGGER_DELAY)
         
-        if thinkMode:
-            response = stripThinkTags(response)
-        return response
-        
-    except requests.exceptions.HTTPError as e:
-        log("LLM", f"LLM HTTP error ({model}): {e}")
-        if e.response is not None:
-            log("LLM", f"Bionic error details: {e.response.text}")
-        return ""
-    except Exception as e:
-        log("LLM", f"LLM connection error ({model}): {e}")
-        return ""
+        try:
+            resp = requests.post(url, json=payload, timeout=max(LLM_TIMEOUT, 120))
+            resp.raise_for_status()
+            
+            response_data = resp.json()
+            response = response_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            
+            if thinkMode:
+                response = stripThinkTags(response)
+            return response
+            
+        except requests.exceptions.HTTPError as e:
+            log("LLM", f"LLM HTTP error ({model}): {e}")
+            if e.response is not None:
+                log("LLM", f"API error details: {e.response.text}")
+            return ""
+        except Exception as e:
+            log("LLM", f"LLM connection error ({model}): {e}")
+            return ""
 
 def callLlm(engine, systemPrompt, userPrompt, options):
     if engine["apiUrl"] and engine["apiKey"]:
